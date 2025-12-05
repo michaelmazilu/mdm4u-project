@@ -2,14 +2,14 @@ import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-
+import streamlit as st
 
 DATA_PATH = "data/nyiso_combined.csv"
 
 
 def find_column(columns, keywords):
     """
-    Find the first column whose name contains all keywords (case-insensitive).
+    Find the first column whose name contains all keywords (case insensitive).
     """
     for col in columns:
         name = col.lower()
@@ -18,24 +18,25 @@ def find_column(columns, keywords):
     raise ValueError(f"Could not find column with keywords: {keywords}")
 
 
+@st.cache_data
 def load_and_clean(path: str) -> pd.DataFrame:
-    # Skip "==> file <==" markers that were introduced when the CSVs were concatenated
-    df = pd.read_csv(path, comment="=")
+    # Skip "==> file <==" markers that appear when CSVs are concatenated
+    df = pd.read_csv(path, low_memory=False, comment="=")
 
-    print("Original columns:")
-    print(list(df.columns))
-    print()
-
-    # Infer column names from partial matches so it works even if NYISO changes labels slightly
+    # Identify relevant columns by partial name matching
     time_col = find_column(df.columns, ["time"])
-    zone_col = find_column(df.columns, ["name"])          # zone name
-    lmp_col = find_column(df.columns, ["lbmp"])           # total LMP
-    cong_col = find_column(df.columns, ["congestion"])    # congestion component
+    zone_col = find_column(df.columns, ["name"])
+    lmp_col = find_column(df.columns, ["lbmp"])
+    cong_col = find_column(df.columns, ["congestion"])
 
-    # Drop any stray header rows left in the body of the file
+    # Drop repeated header rows that may be embedded in the body
     df = df[~df[time_col].astype(str).str.contains("time stamp", case=False, na=False)]
 
-    # Rename to simple standard names
+    # Force numeric types for price related columns
+    for col in [lmp_col, cong_col]:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # Rename to simple names
     df = df.rename(
         columns={
             time_col: "timestamp",
@@ -45,96 +46,122 @@ def load_and_clean(path: str) -> pd.DataFrame:
         }
     )
 
-    # Parse timestamps and numerics, then drop rows that fail
+    # Parse timestamps and drop bad rows
     df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
-    df["lmp"] = pd.to_numeric(df["lmp"], errors="coerce")
-    df["congestion"] = pd.to_numeric(df["congestion"], errors="coerce")
     df = df.dropna(subset=["timestamp", "lmp", "congestion", "zone"])
 
-    # Clean zone names into a simple key, for example:
-    # "N.Y.C." -> "NYC", "WEST" -> "WEST"
+    # Create a cleaned zone key
     df["zone_key"] = df["zone"].str.upper()
     df["zone_key"] = df["zone_key"].str.replace("[^A-Z]", "", regex=True)
-
-    print("Unique zone keys found:")
-    print(sorted(df["zone_key"].unique()))
-    print()
 
     return df
 
 
-def analyze_zone(df: pd.DataFrame, zone_key: str):
-    sub = df[df["zone_key"] == zone_key].copy()
-
-    if sub.empty:
-        print(f"No rows found for zone_key={zone_key}")
-        return None
-
+def analyze_zone(sub: pd.DataFrame, zone_key: str):
     x = sub["congestion"].values
     y = sub["lmp"].values
+
+    if len(sub) < 2:
+        return None
 
     # Correlation
     r = np.corrcoef(x, y)[0, 1]
 
-    # Simple linear regression y = m x + b
+    # Regression y = m x + b
     m, b = np.polyfit(x, y, 1)
 
-    print(f"Zone {zone_key}:")
-    print(f"  Number of observations: {len(sub)}")
-    print(f"  Correlation (r) between congestion and LMP: {r:.4f}")
-    print(f"  Regression line: LMP = {m:.4f} * Congestion + {b:.4f}")
-    print()
+    return {
+        "zone": zone_key,
+        "n": len(sub),
+        "r": r,
+        "m": m,
+        "b": b,
+    }
 
-    return sub, m, b
 
+def main():
+    st.title("NYISO Congestion vs LMP Viewer")
 
-def make_scatter_with_regression(df: pd.DataFrame):
-    # Focus on NYC and WEST
-    target_zones = ["NYC", "WEST"]
-    df_sub = df[df["zone_key"].isin(target_zones)].copy()
-
-    if df_sub.empty:
-        print("No data for NYC or WEST after filtering. Check zone_key values above.")
+    if not os.path.exists(DATA_PATH):
+        st.error(f"Could not find data file at {DATA_PATH}")
         return
 
-    os.makedirs("figures", exist_ok=True)
+    df = load_and_clean(DATA_PATH)
+
+    st.write(f"Total rows after cleaning: {len(df):,}")
+
+    # Show available zones
+    zone_keys = sorted(df["zone_key"].unique())
+    st.sidebar.subheader("Zone selection")
+    selected_zones = st.sidebar.multiselect(
+        "Choose zones",
+        zone_keys,
+        default=[z for z in ["NYC", "WEST"] if z in zone_keys],
+    )
+
+    if not selected_zones:
+        st.warning("Select at least one zone to display.")
+        return
+
+    # Option to filter to positive congestion only
+    positive_only = st.sidebar.checkbox("Use only hours with positive congestion", value=True)
+
+    df_sub = df[df["zone_key"].isin(selected_zones)].copy()
+    if positive_only:
+        df_sub = df_sub[df_sub["congestion"] > 0]
+
+    st.write(f"Rows in current selection: {len(df_sub):,}")
+
+    if df_sub.empty:
+        st.warning("No data for this selection. Try turning off the positive congestion filter or choosing different zones.")
+        return
+
+    # Show a small preview of the data
+    st.subheader("Sample of filtered data")
+    st.dataframe(df_sub[["timestamp", "zone_key", "lmp", "congestion"]].head())
+
+    # Scatter plot with regression line per zone
+    st.subheader("Congestion vs LMP")
 
     fig, ax = plt.subplots(figsize=(9, 6))
 
-    for zone_key in target_zones:
-        sub, m, b = analyze_zone(df_sub, zone_key)
-        if sub is None:
+    stats_rows = []
+
+    for zone_key in selected_zones:
+        sub = df_sub[df_sub["zone_key"] == zone_key]
+        if sub.empty:
             continue
+
+        stats = analyze_zone(sub, zone_key)
+        if stats is None:
+            continue
+
+        stats_rows.append(stats)
 
         # Scatter points
         ax.scatter(sub["congestion"], sub["lmp"], alpha=0.25, label=f"{zone_key}")
 
         # Regression line
         x_vals = np.linspace(sub["congestion"].min(), sub["congestion"].max(), 100)
-        y_vals = m * x_vals + b
+        y_vals = stats["m"] * x_vals + stats["b"]
         ax.plot(x_vals, y_vals)
 
     ax.set_xlabel("Marginal Cost of Congestion ($/MWh)")
     ax.set_ylabel("Locational Marginal Price, LMP ($/MWh)")
-    ax.set_title("Congestion vs LMP for NYC and WEST")
+    ax.set_title("Congestion vs LMP for selected zones")
     ax.legend()
 
-    out_path = os.path.join("figures", "congestion_vs_lmp_nyc_west.png")
-    plt.tight_layout()
-    plt.savefig(out_path, dpi=200)
-    plt.close(fig)
+    st.pyplot(fig)
 
-    print(f"Saved scatterplot with regression to {out_path}")
-
-
-def main():
-    print(f"Loading data from {DATA_PATH}")
-    df = load_and_clean(DATA_PATH)
-
-    print(f"Total rows after cleaning: {len(df)}")
-    print()
-
-    make_scatter_with_regression(df)
+    # Show stats table
+    if stats_rows:
+        st.subheader("Correlation and regression statistics")
+        stats_df = pd.DataFrame(stats_rows)
+        # Round for display
+        stats_df["r"] = stats_df["r"].round(4)
+        stats_df["m"] = stats_df["m"].round(4)
+        stats_df["b"] = stats_df["b"].round(4)
+        st.table(stats_df.set_index("zone"))
 
 
 if __name__ == "__main__":
