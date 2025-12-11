@@ -4,6 +4,107 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import streamlit as st
 
+st.set_page_config(
+    page_title="NYISO Congestion vs LMP",
+    page_icon="📈",
+    layout="wide",
+)
+
+# Enforce light plot styling and dark text
+plt.rcParams.update(
+    {
+        "axes.facecolor": "white",
+        "figure.facecolor": "white",
+        "savefig.facecolor": "white",
+        "text.color": "black",
+        "axes.labelcolor": "black",
+        "axes.edgecolor": "black",
+        "xtick.color": "black",
+        "ytick.color": "black",
+        "legend.edgecolor": "black",
+    }
+)
+
+# Light custom styling to tighten spacing and add a clear visual hierarchy
+st.markdown(
+    """
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Lexend:wght@400;500;600;700;800&display=swap');
+        html, body { background: #ffffff !important; color: #111111; font-family: "Lexend", "Segoe UI", sans-serif; }
+        .stApp { background: #ffffff !important; color: #111111; }
+        .main { padding: 1.5rem 3rem; background: #ffffff !important; color: #111111; }
+        section[data-testid="stSidebar"] { min-width: 220px; max-width: 240px; }
+        section[data-testid="stSidebar"] > div { background: #5d60b3; color: #111111; padding: 0.75rem 1rem; }
+        /* Hide Streamlit top toolbar/header bar */
+        header, [data-testid="stHeader"], div[data-testid="stToolbar"], .stAppToolbar { display: none !important; height: 0 !important; visibility: hidden !important; }
+        .page-wrap { max-width: 1200px; margin: 0 auto; }
+        .app-hero h1 { font-size: 3rem; line-height: 1.05; margin-bottom: 0.4rem; color: #111111; letter-spacing: -0.5px; }
+        .app-hero h1 strong { font-weight: 800; color: #111111; }
+        .app-hero p { color: ##5e5e5e; margin-top: 0; max-width: 720px; font-size: 1.05rem; }
+        hr.divider { border: none; border-top: 1px solid #e0dfd6; margin: 1.5rem 0; }
+        .stat-card {
+            background: #ffffff;
+            padding: 1rem 1.25rem;
+            border-radius: 12px;
+            border: 1px solid #e0dfd6;
+        }
+        .stat-card h4 { margin: 0 0 0.35rem 0; font-size: 0.9rem; color: #3a3a3a; }
+        .stat-card .value { font-size: 1.4rem; font-weight: 700; color: #111111; }
+        .info-banner {
+            background: #ffffff;
+            color: #ffffff;
+            padding: 0.85rem 1rem;
+            border-radius: 10px;
+            border: 1px solid #e0dfd6;
+        }
+        .section-title { font-size: 1.5rem; margin: 1rem 0 0.5rem 0; }
+        /* Force dataframes/tables to be light */
+        .stDataFrame, .stTable {
+            background: #ffffff !important;
+            color: #111111 !important;
+        }
+        .stDataFrame [data-baseweb="table"], .stDataFrame table, .stTable table,
+        div[data-testid="stDataFrame"] table {
+            background: #ffffff !important;
+            color: #111111 !important;
+        }
+        .stDataFrame [data-baseweb="table"] *, .stDataFrame table * , .stTable table *,
+        div[data-testid="stDataFrame"] * {
+            color: #111111 !important;
+            background-color: #ffffff !important;
+        }
+        div[data-testid="stDataFrame"] {
+            background: #ffffff !important;
+            color: #111111 !important;
+            border: 1px solid #e0dfd6;
+            border-radius: 8px;
+        }
+        /* Generic table text force */
+        table, th, td {
+            color: #111111 !important;
+        }
+        /* Custom lightweight table for the sample preview */
+        .light-table table {
+            width: 100%;
+            border-collapse: collapse;
+            background: #ffffff;
+            color: #111111;
+            font-size: 0.95rem;
+        }
+        .light-table th, .light-table td {
+            border: 1px solid #e0dfd6;
+            padding: 6px 8px;
+            text-align: left;
+        }
+        .light-table th {
+            font-weight: 700;
+            background: #ffffff;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 DATA_PATH = "data/nyiso_combined.csv"
 
 
@@ -80,15 +181,25 @@ def analyze_zone(sub: pd.DataFrame, zone_key: str):
 
 
 def main():
-    st.title("NYISO Congestion vs LMP Viewer")
+    st.markdown(
+        """
+        <div class="page-wrap">
+            <div class="app-hero">
+                <h1><strong>NYISO</strong> Congestion vs LMP</h1>
+                <p>Explore how congestion costs shape LMP across every zone. Filter quickly, see correlations instantly, and keep the signal clean.</p>
+            </div>
+            <hr class="divider" />
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     if not os.path.exists(DATA_PATH):
         st.error(f"Could not find data file at {DATA_PATH}")
         return
 
     df = load_and_clean(DATA_PATH)
-
-    st.write(f"Total rows after cleaning: {len(df):,}")
+    total_rows = len(df)
 
     # Show available zones
     zone_keys = sorted(df["zone_key"].unique())
@@ -110,19 +221,51 @@ def main():
     if positive_only:
         df_sub = df_sub[df_sub["congestion"] > 0]
 
-    st.write(f"Rows in current selection: {len(df_sub):,}")
+    points_on_chart = len(df_sub)
+
+    # Stats row
+    with st.container():
+        cols = st.columns(3)
+        with cols[0]:
+            st.markdown(
+                f'<div class="stat-card"><h4>Total rows after cleaning</h4><div class="value">{total_rows:,}</div></div>',
+                unsafe_allow_html=True,
+            )
+        with cols[1]:
+            st.markdown(
+                f'<div class="stat-card"><h4>Rows in current selection</h4><div class="value">{points_on_chart:,}</div></div>',
+                unsafe_allow_html=True,
+            )
+        with cols[2]:
+            st.markdown(
+                f'<div class="stat-card"><h4>Positive congestion only</h4><div class="value">{"Yes" if positive_only else "No"}</div></div>',
+                unsafe_allow_html=True,
+            )
 
     if df_sub.empty:
         st.warning("No data for this selection. Try turning off the positive congestion filter or choosing different zones.")
         return
 
-    # Show a small preview of the data
-    st.subheader("Sample of filtered data")
-    st.dataframe(df_sub[["timestamp", "zone_key", "lmp", "congestion"]].head())
+    # Show how many points will be plotted on the chart (total and per zone)
+    per_zone_counts = df_sub["zone_key"].value_counts()
+    per_zone_text = ", ".join(f"{zone}: {per_zone_counts.get(zone, 0):,}" for zone in selected_zones)
+    st.markdown(
+        f'<div class="info-banner">Points on chart: <strong>{points_on_chart:,}</strong>'
+        + (f" &mdash; {per_zone_text}" if per_zone_text else "")
+        + "</div>",
+        unsafe_allow_html=True,
+    )
+
+    # Show a small preview of the data (rendered as a lightweight HTML table to force light theme)
+    st.markdown('<div class="section-title">Sample of filtered data</div>', unsafe_allow_html=True)
+    sample_df = df_sub[["timestamp", "zone_key", "lmp", "congestion"]].head().reset_index(drop=True)
+    sample_html = sample_df.to_html(index=False, classes="light-table")
+    st.markdown(f'<div class="light-table">{sample_html}</div>', unsafe_allow_html=True)
 
     # Scatter plot with regression line per zone
-    st.subheader("Congestion vs LMP")
+    st.markdown('<div class="section-title">Congestion vs LMP</div>', unsafe_allow_html=True)
 
+    plt.style.use("seaborn-v0_8-whitegrid")
     fig, ax = plt.subplots(figsize=(9, 6))
 
     stats_rows = []
@@ -151,7 +294,7 @@ def main():
     ax.set_title("Congestion vs LMP for selected zones")
     ax.legend()
 
-    st.pyplot(fig)
+    st.pyplot(fig, use_container_width=True)
 
     # Show stats table
     if stats_rows:
