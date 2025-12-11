@@ -34,7 +34,82 @@ st.markdown(
         .stApp { background: #ffffff !important; color: #111111; }
         .main { padding: 1.5rem 3rem; background: #ffffff !important; color: #111111; }
         section[data-testid="stSidebar"] { min-width: 220px; max-width: 240px; }
-        section[data-testid="stSidebar"] > div { background: #5d60b3; color: #111111; padding: 0.75rem 1rem; }
+        section[data-testid="stSidebar"] > div {
+            background: #f0f1f5;
+            color: #111111;
+            padding: 0.75rem 1rem;
+            text-align: center;
+        }
+        section[data-testid="stSidebar"] * { color: #111111 !important; }
+        /* Multiselect styling (input + dropdown) */
+        .stMultiSelect div[role="combobox"] {
+            background: #f0f1f5 !important;
+            border: none !important;
+            color: #111111 !important;
+        }
+        .stMultiSelect div[role="combobox"] * {
+            color: #111111 !important;
+            background: #f0f1f5 !important;
+        }
+        /* BaseWeb select/popover overrides */
+        div[data-baseweb="select"] {
+            background: #f0f1f5 !important;
+            color: #111111 !important;
+            border-color: transparent !important;
+        }
+        div[data-baseweb="select"] * {
+            color: #111111 !important;
+            background: #f0f1f5 !important;
+        }
+        div[data-baseweb="popover"] {
+            background: #ffffff !important;
+            color: #111111 !important;
+            border: 1px solid #cdd4da !important;
+            box-shadow: 0 8px 18px rgba(0,0,0,0.08);
+        }
+        div[data-baseweb="popover"] ul,
+        div[data-baseweb="popover"] li,
+        div[data-baseweb="popover"] [role="listbox"],
+        div[data-baseweb="popover"] [role="option"] {
+            background: #ffffff !important;
+            color: #111111 !important;
+        }
+        div[data-baseweb="popover"] [role="option"]:hover {
+            background: #f2f4f7 !important;
+        }
+        /* Multi-select chips and input area */
+        .stMultiSelect div[data-baseweb="tag"] {
+            background: #f0f1f5 !important;
+            color: #111111 !important;
+            border: none !important;
+            box-shadow: 0 0 0 1px #cdd4da inset;
+        }
+        .stMultiSelect div[data-baseweb="tag"] * {
+            color: #111111 !important;
+            background: #f0f1f5 !important;
+        }
+        .stMultiSelect svg { color: #111111 !important; fill: #111111 !important; }
+        .stMultiSelect label { color: #111111 !important; }
+        /* Force the multiselect input container itself to be light */
+        .stMultiSelect div[data-baseweb="select"] > div {
+            background: #f0f1f5 !important;
+            color: #111111 !important;
+            border-color: #cdd4da !important;
+        }
+        .stMultiSelect div[data-baseweb="select"] div {
+            background: #f0f1f5 !important;
+            color: #111111 !important;
+        }
+        /* Root wrapper of the multi-select control */
+        .stMultiSelect > div {
+            background: #f0f1f5 !important;
+        }
+        .stMultiSelect > div > div {
+            background: #f0f1f5 !important;
+            border: none !important;
+        }
+        /* Info banner hidden when empty */
+        .info-banner:empty { display: none !important; }
         /* Hide Streamlit top toolbar/header bar */
         header, [data-testid="stHeader"], div[data-testid="stToolbar"], .stAppToolbar { display: none !important; height: 0 !important; visibility: hidden !important; }
         .page-wrap { max-width: 1200px; margin: 0 auto; }
@@ -249,12 +324,7 @@ def main():
     # Show how many points will be plotted on the chart (total and per zone)
     per_zone_counts = df_sub["zone_key"].value_counts()
     per_zone_text = ", ".join(f"{zone}: {per_zone_counts.get(zone, 0):,}" for zone in selected_zones)
-    st.markdown(
-        f'<div class="info-banner">Points on chart: <strong>{points_on_chart:,}</strong>'
-        + (f" &mdash; {per_zone_text}" if per_zone_text else "")
-        + "</div>",
-        unsafe_allow_html=True,
-    )
+    # Skip the old info banner to reduce clutter
 
     # Show a small preview of the data (rendered as a lightweight HTML table to force light theme)
     st.markdown('<div class="section-title">Sample of filtered data</div>', unsafe_allow_html=True)
