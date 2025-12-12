@@ -279,6 +279,18 @@ def analyze_zone(sub: pd.DataFrame, zone_key: str):
     }
 
 
+def remove_iqr_outliers(df: pd.DataFrame, zone_col: str, value_col: str, mult: float = 1.5) -> pd.DataFrame:
+    """Per-zone IQR filter (keeps rows within [Q1 - mult*IQR, Q3 + mult*IQR])."""
+    grouped = df.groupby(zone_col)[value_col]
+    q1 = grouped.transform(lambda s: s.quantile(0.25))
+    q3 = grouped.transform(lambda s: s.quantile(0.75))
+    iqr = q3 - q1
+    lower = q1 - mult * iqr
+    upper = q3 + mult * iqr
+    mask = (df[value_col] >= lower) & (df[value_col] <= upper)
+    return df[mask].copy()
+
+
 def main():
     st.markdown(
         """
@@ -308,6 +320,13 @@ def main():
         zone_keys,
         default=[z for z in ["NYC", "WEST"] if z in zone_keys],
     )
+    scatter_layout = st.sidebar.radio(
+        "Scatter layout",
+        options=["Split per zone", "Single combined"],
+        index=0,
+        help="Separate charts reduce overlap; switch to single combined if you prefer one view.",
+    )
+    exclude_outliers = st.sidebar.checkbox("Exclude LMP outliers (1.5×IQR per zone)", value=True)
 
     if not selected_zones:
         st.warning("Select at least one zone to display.")
@@ -319,6 +338,8 @@ def main():
     df_sub = df[df["zone_key"].isin(selected_zones)].copy()
     if positive_only:
         df_sub = df_sub[df_sub["congestion"] > 0]
+    if exclude_outliers:
+        df_sub = remove_iqr_outliers(df_sub, "zone_key", "lmp")
 
     points_on_chart = len(df_sub)
 
@@ -360,13 +381,13 @@ def main():
     st.markdown('<div class="section-title">Congestion vs LMP</div>', unsafe_allow_html=True)
 
     plt.style.use("seaborn-v0_8-whitegrid")
-    fig, ax = plt.subplots(figsize=(9, 6))
 
-    stats_rows = []
     zone_colors = {
         "NYC": "#d62828",   # red
         "WEST": "#1d4ed8",  # blue
     }
+    stats_rows = []
+    zone_plots = []
 
     for zone_key in selected_zones:
         sub = df_sub[df_sub["zone_key"] == zone_key]
@@ -378,29 +399,54 @@ def main():
             continue
 
         stats_rows.append(stats)
+        zone_plots.append((zone_key, sub, stats))
 
-        # Scatter points
-        color = zone_colors.get(zone_key, None)
-        ax.scatter(sub["congestion"], sub["lmp"], alpha=0.25, label=f"{zone_key}", color=color)
+    if not zone_plots:
+        st.warning("No data available for the selected zones.")
+    else:
+        if scatter_layout == "Single combined" or len(zone_plots) == 1:
+            fig, ax = plt.subplots(figsize=(9, 6))
+            for zone_key, sub, stats in zone_plots:
+                color = zone_colors.get(zone_key, None)
+                ax.scatter(sub["congestion"], sub["lmp"], alpha=0.25, label=f"{zone_key}", color=color)
+                x_vals = np.linspace(sub["congestion"].min(), sub["congestion"].max(), 100)
+                y_vals = stats["m"] * x_vals + stats["b"]
+                ax.plot(x_vals, y_vals, color=color)
 
-        # Regression line
-        x_vals = np.linspace(sub["congestion"].min(), sub["congestion"].max(), 100)
-        y_vals = stats["m"] * x_vals + stats["b"]
-        ax.plot(x_vals, y_vals, color=color)
+            ax.set_xlabel("Marginal Cost of Congestion ($/MWh)")
+            ax.set_ylabel("Locational Marginal Price, LMP ($/MWh)")
+            ax.set_title("Congestion vs LMP")
+            ax.legend()
 
-    ax.set_xlabel("Marginal Cost of Congestion ($/MWh)")
-    ax.set_ylabel("Locational Marginal Price, LMP ($/MWh)")
-    ax.set_title("Congestion vs LMP for selected zones")
-    ax.legend()
+            cols_chart = st.columns([1, 6, 1])
+            with cols_chart[1]:
+                st.pyplot(fig, use_container_width=True)
+        else:
+            st.caption("Split view: one chart per selected zone to reduce overlap.")
+            cols_per_row = 2 if len(zone_plots) > 1 else 1
+            for idx in range(0, len(zone_plots), cols_per_row):
+                row_items = zone_plots[idx : idx + cols_per_row]
+                cols = st.columns(len(row_items))
+                for (zone_key, sub, stats), col in zip(row_items, cols):
+                    with col:
+                        fig, ax = plt.subplots(figsize=(7, 5))
+                        color = zone_colors.get(zone_key, None)
+                        ax.scatter(sub["congestion"], sub["lmp"], alpha=0.25, label=f"{zone_key}", color=color)
+                        x_vals = np.linspace(sub["congestion"].min(), sub["congestion"].max(), 100)
+                        y_vals = stats["m"] * x_vals + stats["b"]
+                        ax.plot(x_vals, y_vals, color=color)
+                        ax.set_xlabel("Marginal Cost of Congestion ($/MWh)")
+                        ax.set_ylabel("Locational Marginal Price, LMP ($/MWh)")
+                        ax.set_title(f"Congestion vs LMP — {zone_key}")
+                        ax.legend()
+                        st.pyplot(fig, use_container_width=True)
 
-    cols_chart = st.columns([1, 6, 1])
-    with cols_chart[1]:
-        st.pyplot(fig, use_container_width=True)
-
-    # Box plot comparing LMP distributions for NYC vs WEST (uses full dataset to expose negatives)
-    st.markdown('<div class="section-title">LMP distribution (NYC vs WEST)</div>', unsafe_allow_html=True)
-    box_df = df[df["zone_key"].isin(["NYC", "WEST"])].copy()
-    ordered_zones = ["NYC", "WEST"]
+    # Box plot comparing LMP distributions for selected zones (uses full dataset; optional IQR filtering)
+    st.markdown('<div class="section-title">LMP distribution (selected zones)</div>', unsafe_allow_html=True)
+    box_df = df[df["zone_key"].isin(selected_zones)].copy()
+    if exclude_outliers:
+        box_df = remove_iqr_outliers(box_df, "zone_key", "lmp")
+    ordered_zones = selected_zones
     box_data = []
     box_labels = []
     per_zone_stats = []
@@ -435,7 +481,8 @@ def main():
             showfliers=False,  # hide raw dots for a clean box-only view
             vert=False,  # horizontal orientation
         )
-        colors_for_boxes = [zone_colors.get(z, "#444444") for z in box_labels]
+        default_box_color = "#6b7280"
+        colors_for_boxes = [zone_colors.get(z, default_box_color) for z in box_labels]
         for patch, color in zip(bp["boxes"], colors_for_boxes):
             patch.set(facecolor=color, alpha=0.35, edgecolor=color, linewidth=1.5)
         for median, color in zip(bp["medians"], colors_for_boxes):
@@ -467,9 +514,11 @@ def main():
         cols_box = st.columns([1, 6, 1])
         with cols_box[1]:
             st.pyplot(fig_box, use_container_width=True)
+        outlier_note = "Outliers removed via 1.5×IQR per zone." if exclude_outliers else "Outliers included."
         st.caption(
-            "Boxes show IQR (25th–75th percentile), the line marks the median. "
-            "Axis fixed to -150 to 250 so both tails (incl. -100 and 200 marks) stay visible; extreme spikes may exist outside."
+            "Boxes show IQR (25th–75th percentile) per selected zone, the line marks the median. "
+            "Axis fixed to -150 to 250 so both tails (incl. -100 and 200 marks) stay visible; extreme spikes may exist outside. "
+            f"{outlier_note}"
         )
 
     # Show stats table
