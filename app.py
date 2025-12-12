@@ -143,6 +143,24 @@ st.markdown(
             background: #ffffff !important;
             color: #111111 !important;
         }
+        /* Add visible gridlines to Streamlit tables */
+        .stTable table {
+            border-collapse: collapse !important;
+            width: 100%;
+            border: 1px solid #e0dfd6 !important;
+        }
+        .stTable table th, .stTable table td {
+            border: 1px solid #e0dfd6 !important;
+            padding: 6px 8px !important;
+        }
+        .stTable table thead tr,
+        .stTable table thead th,
+        .stTable table thead th:empty {
+            background: #f7f8fb !important;  /* keep header a single color */
+        }
+        .stTable table thead th {
+            font-weight: 700 !important;
+        }
         .stDataFrame [data-baseweb="table"] *, .stDataFrame table * , .stTable table *,
         div[data-testid="stDataFrame"] * {
             color: #111111 !important;
@@ -174,6 +192,12 @@ st.markdown(
         .light-table th {
             font-weight: 700;
             background: #ffffff;
+        }
+        /* Make matplotlib/pyplot images scale with the container (browser zoom/resizes) */
+        [data-testid="stImage"] img {
+            width: 100% !important;
+            height: auto !important;
+            display: block;
         }
     </style>
     """,
@@ -339,6 +363,10 @@ def main():
     fig, ax = plt.subplots(figsize=(9, 6))
 
     stats_rows = []
+    zone_colors = {
+        "NYC": "#d62828",   # red
+        "WEST": "#1d4ed8",  # blue
+    }
 
     for zone_key in selected_zones:
         sub = df_sub[df_sub["zone_key"] == zone_key]
@@ -352,19 +380,97 @@ def main():
         stats_rows.append(stats)
 
         # Scatter points
-        ax.scatter(sub["congestion"], sub["lmp"], alpha=0.25, label=f"{zone_key}")
+        color = zone_colors.get(zone_key, None)
+        ax.scatter(sub["congestion"], sub["lmp"], alpha=0.25, label=f"{zone_key}", color=color)
 
         # Regression line
         x_vals = np.linspace(sub["congestion"].min(), sub["congestion"].max(), 100)
         y_vals = stats["m"] * x_vals + stats["b"]
-        ax.plot(x_vals, y_vals)
+        ax.plot(x_vals, y_vals, color=color)
 
     ax.set_xlabel("Marginal Cost of Congestion ($/MWh)")
     ax.set_ylabel("Locational Marginal Price, LMP ($/MWh)")
     ax.set_title("Congestion vs LMP for selected zones")
     ax.legend()
 
-    st.pyplot(fig, use_container_width=True)
+    cols_chart = st.columns([1, 6, 1])
+    with cols_chart[1]:
+        st.pyplot(fig, use_container_width=True)
+
+    # Box plot comparing LMP distributions for NYC vs WEST (uses full dataset to expose negatives)
+    st.markdown('<div class="section-title">LMP distribution (NYC vs WEST)</div>', unsafe_allow_html=True)
+    box_df = df[df["zone_key"].isin(["NYC", "WEST"])].copy()
+    ordered_zones = ["NYC", "WEST"]
+    box_data = []
+    box_labels = []
+    per_zone_stats = []
+    for z in ordered_zones:
+        series = box_df[box_df["zone_key"] == z]["lmp"].dropna()
+        if not series.empty:
+            box_data.append(series)
+            box_labels.append(z)
+            per_zone_stats.append(
+                {
+                    "zone": z,
+                    "median": float(series.median()),
+                    "q1": float(series.quantile(0.25)),
+                    "q3": float(series.quantile(0.75)),
+                }
+            )
+
+    if not box_data:
+        st.info("LMP box plot not available because NYC/WEST data is missing.")
+    else:
+        combined_lmp = pd.concat(box_data)
+        min_lmp = np.nanmin(combined_lmp)
+        max_lmp = np.nanmax(combined_lmp)
+        x_min, x_max = -150, 250  # keep both tails in view; shows ticks at -100 and 200
+        span = max(x_max - x_min, 1e-6)
+
+        fig_box, ax_box = plt.subplots(figsize=(7.5, 3.75))
+        bp = ax_box.boxplot(
+            box_data,
+            labels=box_labels,
+            patch_artist=True,
+            showfliers=False,  # hide raw dots for a clean box-only view
+            vert=False,  # horizontal orientation
+        )
+        colors_for_boxes = [zone_colors.get(z, "#444444") for z in box_labels]
+        for patch, color in zip(bp["boxes"], colors_for_boxes):
+            patch.set(facecolor=color, alpha=0.35, edgecolor=color, linewidth=1.5)
+        for median, color in zip(bp["medians"], colors_for_boxes):
+            median.set(color=color, linewidth=2)
+        for whisker in bp["whiskers"] + bp["caps"]:
+            whisker.set(color="#555555", linewidth=1.2)
+        ax_box.axvline(0, color="#888888", linestyle="--", linewidth=1)
+        ax_box.set_xlim(x_min, x_max)
+        ax_box.set_xticks(np.arange(-150, 251, 50))
+        ax_box.set_xlabel("Locational Marginal Price, LMP ($/MWh)")
+        ax_box.set_ylabel("Zone")
+        ax_box.set_title("LMP distribution for NYC vs WEST")
+
+        # Annotate medians and IQR to make interpretation explicit
+        for idx, stats in enumerate(per_zone_stats):
+            y_pos = idx + 1  # matplotlib boxplot positions start at 1
+            x_pos = x_min + 0.02 * span
+            text = f"Med {stats['median']:.1f}; IQR {stats['q1']:.1f}–{stats['q3']:.1f}"
+            ax_box.text(
+                x_pos,
+                y_pos + 0.2,
+                text,
+                fontsize=9,
+                color=zone_colors.get(stats["zone"], "#222222"),
+                va="center",
+                ha="left",
+            )
+
+        cols_box = st.columns([1, 6, 1])
+        with cols_box[1]:
+            st.pyplot(fig_box, use_container_width=True)
+        st.caption(
+            "Boxes show IQR (25th–75th percentile), the line marks the median. "
+            "Axis fixed to -150 to 250 so both tails (incl. -100 and 200 marks) stay visible; extreme spikes may exist outside."
+        )
 
     # Show stats table
     if stats_rows:
