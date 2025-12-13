@@ -32,7 +32,7 @@ st.markdown(
         @import url('https://fonts.googleapis.com/css2?family=Lexend:wght@400;500;600;700;800&display=swap');
         html, body { background: #ffffff !important; color: #111111; font-family: "Lexend", "Segoe UI", sans-serif; }
         .stApp { background: #ffffff !important; color: #111111; }
-        .main { padding: 1.5rem 3rem; background: #ffffff !important; color: #111111; }
+        .main { padding: 0.75rem 3rem 1.5rem 3rem; background: #ffffff !important; color: #111111; }
         section[data-testid="stSidebar"] { min-width: 220px; max-width: 240px; }
         section[data-testid="stSidebar"] > div {
             background: #f0f1f5;
@@ -297,6 +297,7 @@ def main():
         <div class="page-wrap">
             <div class="app-hero">
                 <h1><strong>NYISO</strong> Congestion vs LMP</h1>
+                <p style="margin: 0 0 0.5rem 0; font-weight: 600;">Michael Alexander Mazilu</p>
                 <p>Explore how congestion costs shape LMP across every zone. Filter quickly, see correlations instantly, and keep the signal clean.</p>
             </div>
             <hr class="divider" />
@@ -326,7 +327,7 @@ def main():
         index=0,
         help="Separate charts reduce overlap; switch to single combined if you prefer one view.",
     )
-    exclude_outliers = st.sidebar.checkbox("Exclude LMP outliers (1.5×IQR per zone)", value=True)
+    exclude_outliers = st.sidebar.checkbox("Exclude LMP outliers (1.5×IQR per zone)", value=False)
 
     if not selected_zones:
         st.warning("Select at least one zone to display.")
@@ -345,7 +346,7 @@ def main():
 
     # Stats row
     with st.container():
-        cols = st.columns(3)
+        cols = st.columns(2)
         with cols[0]:
             st.markdown(
                 f'<div class="stat-card"><h4>Total rows after cleaning</h4><div class="value">{total_rows:,}</div></div>',
@@ -354,11 +355,6 @@ def main():
         with cols[1]:
             st.markdown(
                 f'<div class="stat-card"><h4>Rows in current selection</h4><div class="value">{points_on_chart:,}</div></div>',
-                unsafe_allow_html=True,
-            )
-        with cols[2]:
-            st.markdown(
-                f'<div class="stat-card"><h4>Positive congestion only</h4><div class="value">{"Yes" if positive_only else "No"}</div></div>',
                 unsafe_allow_html=True,
             )
 
